@@ -172,12 +172,10 @@ export function packTriangularRoom(base, height, benchL, benchW, gapX, gapZ, mar
 }
 
 /**
- * Filter to handle the front row separately for ALL shapes:
- * 1. Clears standard benches in the front row Z-range.
- * 2. Packs benches on the left and right side pockets of the podium platform dynamically.
- * 3. Places zero benches on top of the podium (kept empty).
+ * Filter to handle front-row pockets and podium top benches based on priority requests.
+ * maxSides: limits the number of side benches generated (used for prioritizing main floor).
  */
-export function applyPodiumRule(benches, shape, roomDims, benchL, benchW, margin, gapX) {
+export function applyPodiumRule(benches, shape, roomDims, benchL, benchW, margin, gapX, podiumCount = 2, maxSides = null) {
   if (benches.length === 0) return benches;
 
   let px = 0;
@@ -196,7 +194,6 @@ export function applyPodiumRule(benches, shape, roomDims, benchL, benchW, margin
     px = (v0.x + v1.x) / 2;
     pz = (v0.z + v1.z) / 2 + 1.5;
     
-    // Mathematically intersect horizontal line z = pz with left wall (V0->V3) and right wall (V1->V2)
     let leftWallX = v0.x;
     if (Math.abs(v3.z - v0.z) > 0.001) {
       leftWallX = v0.x + (pz - v0.z) * (v3.x - v0.x) / (v3.z - v0.z);
@@ -227,80 +224,91 @@ export function applyPodiumRule(benches, shape, roomDims, benchL, benchW, margin
   const frontRowZThreshold = pz + benchW / 2 + margin;
   const backRowBenches = benches.filter(b => b.z > frontRowZThreshold);
 
-  const sideBenches = [];
+  let sideBenches = [];
 
-  // 1. Pack Left Side of Podium: [minX + margin, px - halfPodium - 0.3]
-  const leftStart = minX + margin;
-  const leftEnd = px - halfPodium - 0.3;
-  if (leftEnd - leftStart >= benchL) {
-    const stepX = benchL + gapX;
-    const cols = Math.floor((leftEnd - leftStart + gapX) / stepX);
-    const gridWidth = cols * benchL + (cols - 1) * gapX;
-    const extraPadding = (leftEnd - leftStart - gridWidth) / 2;
-    const startX = leftStart + extraPadding + benchL / 2;
+  if (maxSides !== 0) {
+    // 1. Pack Left Side of Podium
+    const leftStart = minX + margin;
+    const leftEnd = px - halfPodium - 0.3;
+    if (leftEnd - leftStart >= benchL) {
+      const stepX = benchL + gapX;
+      const cols = Math.floor((leftEnd - leftStart + gapX) / stepX);
+      const gridWidth = cols * benchL + (cols - 1) * gapX;
+      const extraPadding = (leftEnd - leftStart - gridWidth) / 2;
+      const startX = leftStart + extraPadding + benchL / 2;
 
-    for (let c = 0; c < cols; c++) {
-      const bx = startX + c * stepX;
-      // Boundary checks
-      if (shape === 'quadrilateral') {
-        if (isPointInPolygon({ x: bx, z: pz }, roomDims.vertices)) {
-          sideBenches.push({ x: bx, z: pz, rotation: 0 });
+      for (let c = 0; c < cols; c++) {
+        const bx = startX + c * stepX;
+        if (shape === 'quadrilateral') {
+          if (isPointInPolygon({ x: bx, z: pz }, roomDims.vertices)) {
+            sideBenches.push({ x: bx, z: pz, rotation: 0 });
+          }
+        } else if (shape === 'circular') {
+          const radius = roomDims.radius;
+          const xOffset = Math.abs(bx) + benchL / 2 + margin;
+          if (xOffset * xOffset + pz * pz <= radius * radius) {
+            sideBenches.push({ x: bx, z: pz, rotation: 0 });
+          }
+        } else if (shape === 'triangular') {
+          const baseAtZ = ((roomDims.height - pz) * roomDims.base) / roomDims.height;
+          if (Math.abs(bx) + benchL / 2 + margin <= baseAtZ / 2) {
+            sideBenches.push({ x: bx, z: pz, rotation: 0 });
+          }
         }
-      } else if (shape === 'circular') {
-        const radius = roomDims.radius;
-        const xOffset = Math.abs(bx) + benchL / 2 + margin;
-        if (xOffset * xOffset + pz * pz <= radius * radius) {
-          sideBenches.push({ x: bx, z: pz, rotation: 0 });
-        }
-      } else if (shape === 'triangular') {
-        const baseAtZ = ((roomDims.height - pz) * roomDims.base) / roomDims.height;
-        if (Math.abs(bx) + benchL / 2 + margin <= baseAtZ / 2) {
-          sideBenches.push({ x: bx, z: pz, rotation: 0 });
+      }
+    }
+
+    // 2. Pack Right Side of Podium
+    const rightStart = px + halfPodium + 0.3;
+    const rightEnd = maxX - margin;
+    if (rightEnd - rightStart >= benchL) {
+      const stepX = benchL + gapX;
+      const cols = Math.floor((rightEnd - rightStart + gapX) / stepX);
+      const gridWidth = cols * benchL + (cols - 1) * gapX;
+      const extraPadding = (rightEnd - rightStart - gridWidth) / 2;
+      const startX = rightStart + extraPadding + benchL / 2;
+
+      for (let c = 0; c < cols; c++) {
+        const bx = startX + c * stepX;
+        if (shape === 'quadrilateral') {
+          if (isPointInPolygon({ x: bx, z: pz }, roomDims.vertices)) {
+            sideBenches.push({ x: bx, z: pz, rotation: 0 });
+          }
+        } else if (shape === 'circular') {
+          const radius = roomDims.radius;
+          const xOffset = Math.abs(bx) + benchL / 2 + margin;
+          if (xOffset * xOffset + pz * pz <= radius * radius) {
+            sideBenches.push({ x: bx, z: pz, rotation: 0 });
+          }
+        } else if (shape === 'triangular') {
+          const baseAtZ = ((roomDims.height - pz) * roomDims.base) / roomDims.height;
+          if (Math.abs(bx) + benchL / 2 + margin <= baseAtZ / 2) {
+            sideBenches.push({ x: bx, z: pz, rotation: 0 });
+          }
         }
       }
     }
   }
 
-  // 2. Pack Right Side of Podium: [px + halfPodium + 0.3, maxX - margin]
-  const rightStart = px + halfPodium + 0.3;
-  const rightEnd = maxX - margin;
-  if (rightEnd - rightStart >= benchL) {
-    const stepX = benchL + gapX;
-    const cols = Math.floor((rightEnd - rightStart + gapX) / stepX);
-    const gridWidth = cols * benchL + (cols - 1) * gapX;
-    const extraPadding = (rightEnd - rightStart - gridWidth) / 2;
-    const startX = rightStart + extraPadding + benchL / 2;
-
-    for (let c = 0; c < cols; c++) {
-      const bx = startX + c * stepX;
-      if (shape === 'quadrilateral') {
-        if (isPointInPolygon({ x: bx, z: pz }, roomDims.vertices)) {
-          sideBenches.push({ x: bx, z: pz, rotation: 0 });
-        }
-      } else if (shape === 'circular') {
-        const radius = roomDims.radius;
-        const xOffset = Math.abs(bx) + benchL / 2 + margin;
-        if (xOffset * xOffset + pz * pz <= radius * radius) {
-          sideBenches.push({ x: bx, z: pz, rotation: 0 });
-        }
-      } else if (shape === 'triangular') {
-        const baseAtZ = ((roomDims.height - pz) * roomDims.base) / roomDims.height;
-        if (Math.abs(bx) + benchL / 2 + margin <= baseAtZ / 2) {
-          sideBenches.push({ x: bx, z: pz, rotation: 0 });
-        }
-      }
-    }
+  // Slice sides if limits requested
+  if (maxSides !== null && maxSides >= 0) {
+    sideBenches = sideBenches.slice(0, maxSides);
   }
 
-  // 3. Inject the 2 benches centered on top of the platform (spaced apart)
-  const pBench1 = { x: px - benchL / 2 - 0.8, z: pz, rotation: 0, isOnPodium: true };
-  const pBench2 = { x: px + benchL / 2 + 0.8, z: pz, rotation: 0, isOnPodium: true };
+  // 3. Inject benches centered on top of the platform
+  const podiumBenches = [];
+  if (podiumCount === 2) {
+    podiumBenches.push({ x: px - benchL / 2 - 0.8, z: pz, rotation: 0, isOnPodium: true });
+    podiumBenches.push({ x: px + benchL / 2 + 0.8, z: pz, rotation: 0, isOnPodium: true });
+  } else if (podiumCount === 1) {
+    podiumBenches.push({ x: px, z: pz, rotation: 0, isOnPodium: true });
+  }
 
-  return [pBench1, pBench2, ...sideBenches, ...backRowBenches];
+  return [...podiumBenches, ...sideBenches, ...backRowBenches];
 }
 
 export function packAdaptiveRoom(shape, roomDims, benchL, benchW, baseGapX, baseGapZ, margin, targetCount = null) {
-  function pack(gx, gz) {
+  function pack(gx, gz, podiumCount = 2, maxSides = null) {
     let rawBenches = [];
     if (shape === 'quadrilateral') {
       rawBenches = packQuadrilateralRoom(roomDims.vertices, benchL, benchW, gx, gz, margin);
@@ -309,23 +317,43 @@ export function packAdaptiveRoom(shape, roomDims, benchL, benchW, baseGapX, base
     } else {
       rawBenches = packTriangularRoom(roomDims.base, roomDims.height, benchL, benchW, gx, gz, margin);
     }
-    return applyPodiumRule(rawBenches, shape, roomDims, benchL, benchW, margin, gx);
+    return applyPodiumRule(rawBenches, shape, roomDims, benchL, benchW, margin, gx, podiumCount, maxSides);
   }
 
-  const baseBenches = pack(baseGapX, baseGapZ);
-  if (targetCount === null || targetCount <= 0 || targetCount >= baseBenches.length) {
-    return baseBenches;
+  // If no target count limit, pack maximum capacity
+  if (targetCount === null || targetCount <= 0) {
+    return pack(baseGapX, baseGapZ, 2, null);
   }
 
-  let bestBenches = baseBenches;
-  for (let s = 1.0; s <= 6.0; s += 0.05) {
-    const currentBenches = pack(baseGapX * s, baseGapZ * s);
-    if (currentBenches.length >= targetCount) {
-      bestBenches = currentBenches;
-    } else {
-      break;
+  // Refined priority checks:
+  // 1. Pack main floor ONLY (no sides, no podium)
+  const maxFloorBenches = pack(baseGapX, baseGapZ, 0, 0);
+
+  if (maxFloorBenches.length >= targetCount) {
+    // Fits completely on the main floor. Spread them out across the main floor, keeping podium and sides empty.
+    let bestBenches = maxFloorBenches;
+    for (let s = 1.0; s <= 6.0; s += 0.05) {
+      const currentBenches = pack(baseGapX * s, baseGapZ * s, 0, 0);
+      if (currentBenches.length >= targetCount) {
+        bestBenches = currentBenches;
+      } else {
+        break;
+      }
     }
+    return bestBenches.slice(0, targetCount);
   }
 
-  return bestBenches.slice(0, targetCount);
+  // 2. Main floor is not enough. We must utilize the podium sides (but not the podium top).
+  const maxFloorAndSidesBenches = pack(baseGapX, baseGapZ, 0, null);
+
+  if (maxFloorAndSidesBenches.length >= targetCount) {
+    // Fits using main floor + some sides.
+    const neededSides = targetCount - maxFloorBenches.length;
+    // Pack using exactly the required side count, and 0 podium benches.
+    return pack(baseGapX, baseGapZ, 0, neededSides).slice(0, targetCount);
+  }
+
+  // 3. Both floor and sides are full. We must use the podium top.
+  const neededOnPodium = Math.min(2, targetCount - maxFloorAndSidesBenches.length);
+  return pack(baseGapX, baseGapZ, neededOnPodium, null).slice(0, targetCount);
 }
